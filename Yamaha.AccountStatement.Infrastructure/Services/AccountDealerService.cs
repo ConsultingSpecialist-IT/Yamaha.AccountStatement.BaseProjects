@@ -1,0 +1,471 @@
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
+using System;
+using System.Linq;
+using Yamaha.AccountStatement.Core.Common;
+using Yamaha.AccountStatement.Core.Models;
+using Yamaha.AccountStatement.Core.Request;
+using Yamaha.AccountStatement.Core.Response;
+using Yamaha.AccountStatement.Infrastructure.Constants;
+using Yamaha.AccountStatement.Infrastructure.Contracts;
+using Yamaha.AccountStatement.Infrastructure.Persistance;
+using Yamaha.AccountStatement.Infrastructure.Resolvers;
+using static System.Runtime.InteropServices.JavaScript.JSType;
+
+namespace Yamaha.AccountStatement.Infrastructure.Services
+{
+    public class AccountDealerService : IAccountDealerService
+    {
+        private readonly IUnitOfWork _unitOfWork;
+        private readonly Db2Options _db2Options;
+        private readonly ILogger _logger;
+        private readonly IConfiguration _configuration;
+        public AccountDealerService(
+            ILogger<AccountDealerService> logger,
+            IUnitOfWork unitOfWork,
+            IOptions<Db2Options> db2Options,
+            IConfiguration configuration)
+        {
+            _unitOfWork = unitOfWork;
+            _db2Options = db2Options.Value;
+            _logger = logger;
+            _configuration = configuration;
+        }
+        public async Task<BaseDataResponse<List<AccountDealer>>> GetAccountDealersAsync(CancellationToken cancellationToken)
+        {
+            var parameters = new AccountDealersParameter
+            (
+                null,
+                null,
+                null
+            );
+
+            var result = await _unitOfWork.AccountDealerOutput.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetAccountStatementClients} (?, ?, ?)", parameters);
+
+            List<AccountDealer> dealers = [.. result.Select(x => new AccountDealer
+            (
+              x.IdCliente,
+              x.ClaveCliente,
+              x.SufijoFacturacion,
+              x.NombreCliente,
+              x.Estatus == 1
+            ))];
+
+            var response = new BaseDataResponse<List<AccountDealer>>(
+                true,
+                CommonMessages.SuccessResponse,
+                dealers);
+
+            return response;
+
+        }
+        
+        public async Task<BaseDataResponse<List<AccountDealer>>> GetAccountDealersAsync(string? dealerKey, CancellationToken cancellationToken)
+        {
+            var parameters = new AccountDealersParameter
+            (
+                string.IsNullOrWhiteSpace(dealerKey) ? null : dealerKey.Trim(),
+                null,
+                null
+            );
+
+            var result = await _unitOfWork.AccountDealerOutput.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetAccountStatementClients} (?, ?, ?)", parameters);
+
+            List<AccountDealer> dealers = [.. result.Select(x => new AccountDealer
+            (
+              x.IdCliente,
+              x.ClaveCliente,
+              x.SufijoFacturacion,
+              x.NombreCliente,
+              x.Estatus == 1
+            ))];
+
+            var response = new BaseDataResponse<List<AccountDealer>>(
+                true,
+                CommonMessages.SuccessResponse,
+                dealers);
+
+            return response;
+
+        }
+        
+        public async Task<BaseDataResponse<List<AccountDealer>>> GetAccountDealers000Async(CancellationToken cancellationToken)
+        {
+            var parameters = new AccountDealersParameter
+            (
+            	null,
+                "000",
+                null
+            );
+
+            var result = await _unitOfWork.AccountDealerOutput.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetAccountStatementClients} (?, ?, ?)", parameters);
+
+            List<AccountDealer> dealers = [.. result.Select(x => new AccountDealer
+            (
+              x.IdCliente,
+              x.ClaveCliente,
+              x.SufijoFacturacion,
+              x.NombreCliente,
+              x.Estatus == 1
+            ))];
+
+            var response = new BaseDataResponse<List<AccountDealer>>(
+                true,
+                CommonMessages.SuccessResponse,
+                dealers);
+
+            return response;
+
+        }
+
+        public async Task<BaseDataResponse<List<AccountDealer>>> GetEnrolledAccountDealersAsync(string? dealerKey, CancellationToken cancellationToken)
+        {
+            var parameters = new AccountDealersParameter
+            (
+                string.IsNullOrWhiteSpace(dealerKey) ? null : dealerKey.Trim(),
+                null,
+                null
+            );
+
+            var result = await _unitOfWork.AccountDealerOutput.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetAccountStatementEnrolledClients} (?, ?, ?)", parameters);
+
+            List<AccountDealer> dealers = [.. result.Select(x => new AccountDealer
+            (
+              x.IdCliente,
+              x.ClaveCliente,
+              x.SufijoFacturacion,
+              x.NombreCliente,
+              x.Estatus == 1
+            ))];
+
+            var response = new BaseDataResponse<List<AccountDealer>>(
+                true,
+                CommonMessages.SuccessResponse,
+                dealers);
+
+            return response;
+
+        }
+        public async Task<BaseDataResponse<FileData>> GetAccountStatementFileAsync(string clientKey, string branchCode, string month, int year, CancellationToken cancellationToken)
+        {
+            FileData? file = null;
+            string? basePath = _configuration["FilesBasePath"];
+            if (string.IsNullOrEmpty(basePath))
+            {
+                return new BaseDataResponse<FileData>(
+                    false,
+                    CommonMessages.BasePathNotFound,
+                    file
+                    );
+            }
+            string fileName = $"{clientKey}-000-{year}-{month}.pdf";
+            string filePath = Path.Combine(basePath, $"{year}-{month}", fileName);
+            var memory = new MemoryStream();
+            await using var stream = new FileStream(filePath, FileMode.Open);
+            await stream.CopyToAsync(memory, cancellationToken);
+            file = new FileData
+            {
+                FileName = fileName,
+                ContentType = "application/pdf",
+                Length = memory.Length,
+                Data = memory.ToArray()
+            };
+
+            return new BaseDataResponse<FileData>(
+                true,
+                CommonMessages.SuccessResponse,
+                file
+                );
+
+        }
+
+        public async Task<BaseDataResponse<List<DealerAccountStatement>>> GetClientAccountStatementAsync(string clientKey, CancellationToken cancellationToken)
+        {
+            DateTime reconciledDate = DateTime.Now.AddMonths(-1);
+            string searchPeriod = $"{reconciledDate.Year}-{reconciledDate.Month.ToString("00")}";
+            var parameters = new
+            {
+                clientKey,
+                searchPeriod
+            };
+            var result = await _unitOfWork.ClientAccountStatementOutput.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetClientAccountStatement} (?, ?)", parameters);
+
+            if (result is null)
+            {
+                return new BaseDataResponse<List<DealerAccountStatement>>(
+                    false,
+                    CommonMessages.EmptyClientBalance,
+                    []
+                    );
+            }
+            decimal balance = 0;
+            decimal transactionAmount;
+            List<DealerAccountStatement> accountStatement = [];
+            foreach(var data in result)
+            {
+                transactionAmount = 0;
+                if(data.TipoDocumento == Common.Note || data.TipoDocumento == Common.Payment)
+                {
+                    transactionAmount = data.ImporteDocumento * -1;
+                }
+                balance = balance + data.ImporteDocumento - data.ImportePago + transactionAmount;
+
+                if(data.TipoDocumento != Common.Payment)
+                {
+                    accountStatement.Add(new DealerAccountStatement
+                    (
+                        !string.IsNullOrEmpty(data.FechaDocumento) ? Convert.ToDateTime(data.FechaDocumento) : null,
+                        !string.IsNullOrEmpty(data.FechaPago) ? Convert.ToDateTime(data.FechaPago) : null,
+                        !string.IsNullOrEmpty(data.FechaVencimiento) ? Convert.ToDateTime(data.FechaVencimiento) : null,
+                        data.IdDocumento,
+                        data.ImporteDocumento,
+                        data.ImportePago,
+                        data.NumeroDocumento,
+                        data.TipoDocumento,
+                        balance
+                    ));
+                }
+            }
+
+            return new BaseDataResponse<List<DealerAccountStatement>>(
+                true,
+                CommonMessages.SuccessResponse,
+                accountStatement);
+
+        }
+
+        public async Task<BaseDataResponse<DealerAccountStatementResult>> GetClientAccountStatementsAsync(string clientKey, CancellationToken cancellationToken)
+        {
+            DateTime reconciledDate = DateTime.Now.AddMonths(-1);
+            string searchPeriod = $"{reconciledDate.Year}-{reconciledDate.Month:00}";
+
+            var parameters = new
+            {
+                clientKey,
+                searchPeriod
+            };
+
+            var result = await _unitOfWork.ClientAccountStatementOutput
+                .QueryStoredProcedureAsync(
+                    $"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetClientAccountStatement} (?, ?)",
+                    parameters);
+
+            if (result is null)
+            {
+                return new BaseDataResponse<DealerAccountStatementResult>(
+                    false,
+                    CommonMessages.EmptyClientBalance,
+                    new DealerAccountStatementResult
+                    {
+                        BalanceDue = 0,
+                        Statements = []
+                    });
+            }
+
+            decimal balance = 0;
+            decimal balanceDue = 0;
+
+            List<DealerAccountStatement> accountStatements = [];
+
+            foreach (var data in result)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                decimal transactionAmount = 0;
+
+                if (data.TipoDocumento == Common.Note || data.TipoDocumento == Common.Payment)
+                {
+                    transactionAmount = data.ImporteDocumento * -1;
+                }
+
+                balance = balance + data.ImporteDocumento - data.ImportePago + transactionAmount;
+
+                if (string.Equals(data.SumaSaldoVencido, "*", StringComparison.Ordinal))
+                {
+                    balanceDue += data.ImporteDocumento;
+                }
+
+                if (data.TipoDocumento != Common.Payment)
+                {
+                    accountStatements.Add(new DealerAccountStatement
+                    (
+                        !string.IsNullOrEmpty(data.FechaDocumento) ? Convert.ToDateTime(data.FechaDocumento) : null,
+                        !string.IsNullOrEmpty(data.FechaPago) ? Convert.ToDateTime(data.FechaPago) : null,
+                        !string.IsNullOrEmpty(data.FechaVencimiento) ? Convert.ToDateTime(data.FechaVencimiento) : null,
+                        data.IdDocumento,
+                        data.ImporteDocumento,
+                        data.ImportePago,
+                        data.NumeroDocumento,
+                        data.TipoDocumento,
+                        balance
+                    ));
+                }
+            }
+
+            var response = new DealerAccountStatementResult
+            {
+                BalanceDue = balanceDue,
+                Statements = accountStatements
+            };
+
+            return new BaseDataResponse<DealerAccountStatementResult>(
+                true,
+                CommonMessages.SuccessResponse,
+                response);
+        }
+
+        public async Task<BaseDataResponse<DealerBalance>> GetClientBalanceAsync(string clientKey, CancellationToken cancellationToken)
+        {
+            DealerBalance? clientBalance = null;
+            var result = await _unitOfWork.ClientBalanceOutput.ExecuteSelectAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetClientBalance} (?)", new { clientKey });
+
+            if(result is null)
+            {
+                return new BaseDataResponse<DealerBalance>(
+                    false,
+                    CommonMessages.EmptyClientBalance,
+                    clientBalance
+                    );
+            }
+
+            clientBalance = new DealerBalance(
+                result.ClaveCliente,
+                result.SufijoFacturacion,
+                result.NombreCliente,
+                result.LimiteCredito,
+                result.PendienteFacturar,
+                result.SaldoBalance,
+                result.BalanceLetra,
+                result.SaldoDisponible
+                );
+
+            var response = new BaseDataResponse<DealerBalance>(
+                true,
+                CommonMessages.SuccessResponse,
+                clientBalance);
+
+            return response;
+        }
+
+        public async Task<BaseDataResponse<List<AccountDealer>>> UpdateAccountDealerStatusAsync(List<UpdateAccountDealerStatusRequest> request, CancellationToken cancellationToken)
+        {
+            if (request.Count == 0)
+            {
+                return new BaseDataResponse<List<AccountDealer>>(
+                    false,
+                    CommonMessages.EmptyAccountDealersRequest,
+                    null
+                    );
+            }
+            var parameter = request.Select(x => new UpdateAccountDealerOutput(
+                    x.DealerKey,
+                    x.BillingSuffix,
+                    x.Status ? (short)1 : (short)0
+                )).ToList();
+
+            var settings = new JsonSerializerSettings
+            {
+                ContractResolver = new UpperCasePropertyNamesContractResolver()
+            };
+            string jsonString = JsonConvert.SerializeObject(parameter, settings);
+
+            _ = await _unitOfWork.AccountDealerOutput.ExecuteAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.InsertUpdateAccountStatementClients} (1, ?)",
+                new { jsonString });
+
+            var parameters = new AccountDealersParameter
+            (
+                null,
+                null,
+                null
+            );
+
+            var result = await _unitOfWork.AccountDealerOutput.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetAccountStatementClients} (?, ?, ?)", parameters);
+
+            List<AccountDealer> dealers = [.. result.Select(x => new AccountDealer
+            (
+              x.IdCliente,
+              x.ClaveCliente,
+              x.SufijoFacturacion,
+              x.NombreCliente,
+              x.Estatus == 1
+            ))];
+
+            var response = new BaseDataResponse<List<AccountDealer>>(
+                    true,
+                    CommonMessages.SuccessResponse,
+                    dealers);
+
+            return response;
+
+        }
+
+        public async Task<BaseDataResponse<List<Periods>>> GetPeriodsAccountStatementAsync(string period, CancellationToken cancellationToken)
+        {
+			DealerBalance? clientBalance = null;
+            var result = await _unitOfWork.PeriodsOutPut.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetStatementPeriods} (?)", new { period });
+
+            if (result is null)
+            {
+                return new BaseDataResponse<List<Periods>>(
+                    false,
+                    CommonMessages.EmptyPeriods,
+                    []
+                    );
+            }
+            
+            List<Periods> periods = [];
+            foreach (var data in result)
+            {
+                periods.Add(new Periods
+                    (
+                        data.AnioMesCorte,
+                        data.AnioMesCorteLetra
+                    ));
+            }
+
+            return new BaseDataResponse<List<Periods>>(
+                true,
+                CommonMessages.SuccessResponse,
+                periods);
+        }
+
+        public async Task<BaseDataResponse<List<Parameters>>> GetParametersAsync(int? idParameter, string parameterName, CancellationToken cancellationToken)
+        {
+            var parameters = new
+            {
+                idParameter,
+                parameterName
+            };
+            var result = await _unitOfWork.ParametersOutPut.QueryStoredProcedureAsync($"CALL {_db2Options.DatabaseSchema}.{StoredProcedureNames.GetParameters} (?, ?)", parameters);
+
+            if (result is null)
+            {
+                return new BaseDataResponse<List<Parameters>>(
+                    false,
+                    CommonMessages.EmptyPeriods,
+                    []
+                    );
+            }
+
+            List<Parameters> parameter = [];
+            foreach (var data in result)
+            {
+                parameter.Add(new Parameters
+                    (
+                        data.IdParametro,
+                        data.Nombre,
+                        data.Valor,
+                        data.Descripcion,
+                        data.Estatus
+                    ));
+            }
+
+            return new BaseDataResponse<List<Parameters>>(
+                true,
+                CommonMessages.SuccessResponse,
+                parameter);
+        }
+    }
+}
