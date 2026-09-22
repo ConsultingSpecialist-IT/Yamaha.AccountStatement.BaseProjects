@@ -7,6 +7,7 @@ namespace Yamaha.AccountStatement.Infrastructure.Contracts
     public interface IAccountDealerService
     {
         Task<BaseDataResponse<List<AccountDealer>>> GetAccountDealersAsync(CancellationToken cancellationToken);
+        Task<BaseDataResponse<List<AccountDealer>>> GetAccountDealers000Async(CancellationToken cancellationToken); 
         Task<BaseDataResponse<List<AccountDealer>>> GetAccountDealersAsync(string? dealerKey, CancellationToken cancellationToken);
         Task<BaseDataResponse<List<AccountDealer>>> GetEnrolledAccountDealersAsync(string? dealerKey, CancellationToken cancellationToken);
         Task<BaseDataResponse<FileData>> GetAccountStatementFileAsync(string clientKey, string branchCode, string month, int year, CancellationToken cancellationToken);

@@ -43,7 +43,7 @@ namespace Yamaha.AccountStatement.Infrastructure.Services
 
             string statementPeriod = _statementFileNameBuilder.GetStatementPeriod();
 
-            var dealersResponse = await _accountDealerService.GetAccountDealersAsync(cancellationToken);
+            var dealersResponse = await _accountDealerService.GetAccountDealers000Async(cancellationToken);
 
             if (dealersResponse?.Data == null || dealersResponse.Data.Count == 0)
             {
