@@ -162,6 +162,16 @@ namespace Yamaha.AccountStatement.Infrastructure.Services
             }
             string fileName = $"{clientKey}-000-{year}-{month}.pdf";
             string filePath = Path.Combine(basePath, $"{year}-{month}", fileName);
+
+            if (!File.Exists(filePath))
+            {
+                return new BaseDataResponse<FileData>(
+                    false,
+                    "NO existe información para entregar el estado de cuenta para el mes seleccionado",
+                    file
+                );
+            }
+
             var memory = new MemoryStream();
             await using var stream = new FileStream(filePath, FileMode.Open);
             await stream.CopyToAsync(memory, cancellationToken);
